@@ -1,0 +1,43 @@
+package rd
+
+type Limit int
+
+const (
+	LimitMaxBoundUniformSets Limit = iota
+	LimitMaxFramebufferColorAttachments
+	LimitMaxTexturesPerUniformSet
+	LimitMaxSamplersPerUniformSet
+	LimitMaxStorageBuffersPerUniformSet
+	LimitMaxStorageImagesPerUniformSet
+	LimitMaxUniformBuffersPerUniformSet
+	LimitMaxDrawIndexedIndex
+	LimitMaxFramebufferHeight
+	LimitMaxFramebufferWidth
+	LimitMaxTextureArrayLayers
+	LimitMaxTextureSize1D
+	LimitMaxTextureSize2D
+	LimitMaxTextureSize3D
+	LimitMaxTextureSizeCube
+	LimitMaxTexturesPerShaderStage
+	LimitMaxSamplersPerShaderStage
+	LimitMaxStorageBuffersPerShaderStage
+	LimitMaxStorageImagesPerShaderStage
+	LimitMaxUniformBuffersPerShaderStage
+	LimitMaxPushConstantSize
+	LimitMaxUniformBufferSize
+	LimitMaxVertexInputAttributeOffset
+	LimitMaxVertexInputAttributes
+	LimitMaxVertexInputBindings
+	LimitMaxVertexInputBindingStride
+	LimitMinUniformBufferOffsetAlignment
+	LimitMaxComputeSharedMemorySize
+	LimitMaxComputeWorkgroupCountX
+	LimitMaxComputeWorkgroupCountY
+	LimitMaxComputeWorkgroupCountZ
+	LimitMaxComputeWorkgroupInvocations
+	LimitMaxComputeWorkgroupSizeX
+	LimitMaxComputeWorkgroupSizeY
+	LimitMaxComputeWorkgroupSizeZ
+	LimitMaxViewportDimensionsX
+	LimitMaxViewportDimensionsY
+)
