@@ -107,7 +107,7 @@ type Interface interface {
 	SetResourceName(resource RID, name string)
 
 	ShaderCompileBinaryFromSPIRV(span mmm.Lifetime, shader ffi.Managed[ShaderSPIRV], name string) ffi.Bytes
-	ShaderCompileSourceIntoSPIRV(span mmm.Lifetime, shader ffi.Managed[ShaderSource], allow_cache bool) ffi.Managed[ShaderSPIRV]
+	ShaderCompileSourceIntoSPIRV(span mmm.Lifetime, shader ffi.Managed[ShaderSource], allow_cache bool) ShaderSPIRV
 	ShaderCreateFromBytecode(span mmm.Lifetime, code ffi.Bytes, id ShaderPlaceholder) Shader
 	ShaderCreateFromSPIRV(span mmm.Lifetime, shader ffi.Managed[ShaderSPIRV], name string) Shader
 	ShaderCreatePlaceholder(span mmm.Lifetime) ShaderPlaceholder
