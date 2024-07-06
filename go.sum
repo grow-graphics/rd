@@ -2,9 +2,3 @@ grow.graphics/uc v0.0.0-20240128001120-57fde712a2f4 h1:oCxs27eH3FW15+xGaAVsLSp6S
 grow.graphics/uc v0.0.0-20240128001120-57fde712a2f4/go.mod h1:rNkUY9tOrmdnN9bjAJkmK8fKT0u6qftXOXitETbIlzo=
 grow.graphics/xy v0.0.0-20240603021049-7427233fc3a9 h1:7DTN0CCvKzohFhaeb1vNC1XackvyL4u1UwQDBzQixJo=
 grow.graphics/xy v0.0.0-20240603021049-7427233fc3a9/go.mod h1:JwNaWFtFaeSmvp34kveQhSGN8dNowvLlz55K/c9bs1E=
-runtime.link v0.0.0-20240701115931-4e64a1336202 h1:YHHZC2oE5AJPjxzQ7mvJm/I9O1SlF9mZEMcS2Ka/DU0=
-runtime.link v0.0.0-20240701115931-4e64a1336202/go.mod h1:lV/Nllw9AHBUtQk69IfNc0ovSmd4AFFUt2W6Su3rDVQ=
-runtime.link v0.0.0-20240703051215-df8d9e173c4e h1:AX3rf02nIAo4KBKoKTNt27jsekcGnQXGWwlmCu1m7Uw=
-runtime.link v0.0.0-20240703051215-df8d9e173c4e/go.mod h1:lV/Nllw9AHBUtQk69IfNc0ovSmd4AFFUt2W6Su3rDVQ=
-runtime.link v0.0.0-20240706100251-1b46cf7b6783 h1:qEDa6njRTmbyn+byX214X8rUgJrm+MPLzCLnQEflEiE=
-runtime.link v0.0.0-20240706100251-1b46cf7b6783/go.mod h1:lV/Nllw9AHBUtQk69IfNc0ovSmd4AFFUt2W6Su3rDVQ=
