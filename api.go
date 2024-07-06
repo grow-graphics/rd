@@ -1,590 +1,542 @@
+// Package rd provides a rendering device interface for low-level rendering operations.
 package rd
 
 import (
+	"io"
 	"time"
 
 	"grow.graphics/uc"
 	"grow.graphics/xy"
-	"runtime.link/ffi"
-	"runtime.link/mmm"
 )
 
+// Interface to the rendering device.
 type Interface interface {
-	Barrier(from, to BarrierMask)
+	// Barrier puts a memory barrier in place. This is used for synchronization to avoid data races.
+	// See also [Interface.FullBarrier], which may be useful for debugging.
+	Barrier(from, upto Barrier)
 
-	BufferClear(buffer Buffer, offset, size_bytes int, post_barrier BarrierMask) error
-	BufferGetData(lifetime mmm.Lifetime, buffer Buffer, offset_bytes, size_bytes int) ffi.Bytes
-	BufferUpdate(buffer Buffer, offset, size_bytes int, data ffi.Bytes, post_barrier BarrierMask) error
+	// BarrierFull puts a full memory barrier in place. This is a memory barrier with all flags enabled.
+	// It should only be used for debugging as it can severely impact performance.
+	BarrierFull()
 
-	CaptureTimestamp(name string)
-	GetCapturedTimestampTimeCPU(index int) time.Duration
-	GetCapturedTimestampTimeGPU(index int) time.Duration
-	GetCapturedTimestampName(index int) string
-	GetCapturedTimestampsCount() int
-	GetCapturedTimestampsFrame() int
+	// CaptureTimestamp creates a timestamp marker with the specified name. This is used for performance
+	// reporting with the [Timestamp.CPU], [Timestamp.GPU] and [Timestamp.Name] methods.
+	CaptureTimestamp(name string) Timestamp
 
-	ComputeListBegin(allow_draw_overlap bool) ComputeList
-	ComputeListAddBarrier(list ComputeList)
-	ComputeListBindComputePipeline(list ComputeList, pipeline ComputePipeline)
-	ComputeListBindUniformSet(list ComputeList, set UniformSet, set_index int)
-	ComputeListDispatch(list ComputeList, groups_x, groups_y, groups_z int)
-	ComputeListEnd(mask BarrierMask)
-	ComputeListSetPushConstant(list ComputeList, buffer ffi.Bytes, size_bytes int)
+	// CompileBinary creates a new shader instance from a binary compiled shader.
+	CompileBinary(data []byte) Shader
 
-	ComputePipelineCreate(span mmm.Lifetime, shader Shader, constants ffi.Managed[[]PipelineSpecializationConstant]) ComputePipeline
-	ComputePipelineIsValid(pipeline ComputePipeline) bool
+	/*
+		Compiles a binary shader from spirv and returns the compiled binary data as bytes. This compiled
+		shader is specific to the GPU model and driver version used; it will not work on different GPU models
+		or even different driver versions. See also [Interface.CompileSource].
 
-	CreateLocalDevice(span mmm.Lifetime) Interface
+		'name' is an optional human-readable name that can be given to the compiled shader for organizational
+		purposes.
+	*/
+	CompileSPIRV(name string, spriv SPIRV) []byte
 
-	DrawCommandBeginLabel(name string, color uc.Color)
-	DrawCommandEndLabel()
-	DrawCommandInsertLabel(name string, color uc.Color)
+	/*
+		Compiles a SPIR-V from the shader source code in shader_source and returns the SPIR-V as a [ShaderSPIRV].
+		This intermediate language shader is portable across different GPU models and driver versions, but cannot
+		be run directly by GPUs until compiled into a binary shader using [Interface.CompileSPIRV].
 
-	DrawListBegin(fb Framebuffer,
-		initial_color_action InitialAction, final_color_action FinalAction,
-		initial_depth_action InitialAction, final_depth_action FinalAction,
-		clear_color_values ffi.Slice[uc.Color], clear_depth float64, clear_stencil int,
-		region xy.Rect2, storage_textures ffi.Managed[[]Texture],
-	)
-	DrawListBeginForScreen(screen Screen, clear_color uc.Color) DrawList
-	DrawListBeginSplit(span mmm.Lifetime, fb Framebuffer, splits int,
-		initial_color_action InitialAction, final_color_action FinalAction,
-		initial_depth_action InitialAction, final_depth_action FinalAction,
-		clear_color_values ffi.Slice[uc.Color], clear_depth float64, clear_stencil int,
-		region xy.Rect2, storage_textures ffi.Managed[[]Texture],
-	) ffi.Slice[DrawList]
-	DrawListBindIndexArray(list DrawList, array IndexArray)
-	DrawListBindRenderPipeline(list DrawList, pipeline RenderPipeline)
-	DrawListBindUniformSet(list DrawList, set UniformSet, set_index int)
-	DrawListBindVertexArray(list DrawList, array VertexArray)
-	DrawListDisableScissor(list DrawList)
-	DrawListDraw(list DrawList, use_indices bool, instances int, procedural_vertex_count int)
-	DrawListEnableScissor(list DrawList, rect xy.Rect2)
-	DrawListEnd(mask BarrierMask)
-	DrawListSetBlendConstants(list DrawList, constants uc.Color)
-	DrawListSetPushConstant(list DrawList, buffer ffi.Bytes, size_bytes int)
-	DrawListSwitchToNextPass() DrawList
-	DrawListSwitchToNextPassSplit(span mmm.Lifetime, splits int) ffi.Slice[DrawList]
+		If 'cache' is true, make use of the shader cache. This avoids a potentially lengthy shader compilation
+		step if the shader is already in cache. If 'cache' is false, the shader cache is ignored and the shader
+		will always be recompiled.
+	*/
+	CompileSource(cache bool, source ShaderSource) SPIRV
 
-	FramebufferCreate(span mmm.Lifetime, textures ffi.Managed[[]Texture], validate_with_format, view_count int) Framebuffer
-	FramebufferCreateEmpty(span mmm.Lifetime, size xy.Vector2i, samples TextureSamples, validate_with_format int) Framebuffer
-	FramebufferCreateMultipass(span mmm.Lifetime, textures ffi.Managed[[]Texture], passes ffi.Managed[[]FramebufferPass], validate_with_format, view_count int) Framebuffer
-	FramebufferGetFormat(fb Framebuffer) FramebufferFormat
-	FramebufferIsValid(Framebuffer) bool
+	/*
+		Compute is used to prepare a list of compute commands with [ComputeList] methods.
+		You may not call this method from within 'fn'.
 
-	FramebufferFormatCreate(attachments ffi.Managed[[]AttachmentFormat], view_count int) FramebufferFormat
-	FramebufferFormatCreateEmpty(samples TextureSamples) FramebufferFormat
-	FramebufferFormatCreateMultipass(attachments ffi.Managed[[]AttachmentFormat], passes ffi.Managed[[]FramebufferPass], view_count int) FramebufferFormat
-	FramebufferFormatGetTextureSamples(format1 FramebufferFormat, render_pass int) TextureSamples
+		A simple compute operation might look like this (code is not a complete example):
 
-	FullBarrier()
-	GetDeviceName() string
-	GetDevicePipelineCacheUUID() string
-	GetDeviceVendorName() string
-	GetDriverResource(resource DriverResource, rid RID, index int) int
-	GetFrameDelay() int
-	GetMemoryUsage(mtype MemoryType) int
+			RD.Compute(func(compute rd.ComputeList) {
+				compute.BindPipeline(computeShaderDilatePipeline)
+				compute.BindUniformSet(computeBaseUniformSet, 0)
+				compute.BindUniformSet(dilateUniformSet, 1)
+				for i := range atlasSlices {
+					compute.SetPushConstant(pushConstant, pushConstant.Size())
+					compute.Dispatch(groupSize.X, groupSize.Y, groupSize.Z)
+				}
+			})
+	*/
+	Compute(fn func(Compute))
 
-	IndexArrayCreate(span mmm.Lifetime, buf IndexBuffer, offset, count int) IndexArray
-	IndexBufferCreate(span mmm.Lifetime, size_indices int, format IndexBufferFormat, data ffi.Bytes, use_restart_indicies bool) IndexBuffer
+	// DeviceName returns the name of the video adapter (e.g. "GeForce GTX 1080/PCIe/SSE2").
+	DeviceName() string
 
-	LimitGet(limit Limit) int
+	// DeviceVendor returns the name of the video adapter vendor (e.g. "NVIDIA Corporation").
+	DeviceVendor() string
 
-	RenderPipelineCreate(span mmm.Lifetime, shader Shader, framebuffer_format FramebufferFormat, vertex_format VertexFormat,
-		primitive RenderPrimitive, rasterization_state ffi.Managed[PipelineRasterizationState], multisample_state ffi.Managed[PipelineMultisampleState],
-		stencil_state ffi.Managed[PipelineDepthStencilState], color_blend_state ffi.Managed[PipelineColorBlendState], dynamic_state_flags PipelineDynamicStateFlags,
-		for_render_pass int, specialization_constants ffi.Managed[[]PipelineSpecializationConstant],
-	) RenderPipeline
-	RenderPipelineIsValid(pipeline RenderPipeline) bool
+	/*
+		Drawing starts a list of raster drawing commands created with the [Drawing] methods.
 
-	SamplerCreate(span mmm.Lifetime, state ffi.Managed[SamplerState]) Sampler
-	SamplerIsFormatSupportedForFilter(format DataFormat, filter SamplerFilter) bool
+		A simple drawing operation might look like this (code is not a complete example):
 
-	ScreenGetFramebufferFormat() FramebufferFormat
-	ScreenGetHeight(screen Screen) int64
-	ScreenGetWidth(screen Screen) int64
+			target := rd.DrawingTarget{
+				Framebuffer: framebuffers[i],
+				InitialColorAction: rd.InitialActionClear,
+				FinalColorAction: rd.FinalActionRead,
+				InitialDepthAction: rd.InitialActionClear,
+				FinalDepthAction: rd.FinalActionDiscard,
+				ClearColorValues: []uc.Color{{},{},{}},
+			}
+			RD.Drawing(target, func(drawing rd.Drawing) {
+				drawing.SetShader(shader)
+				drawing.SetVariables(rd.VariablesForFrame, globalVariables)
+				drawing.SetData(data)
+				drawing.Submit(false, 1, slice_triangle_count[i] * 3)
+			})
+	*/
+	Drawing(frame Frame, fn func(Drawing))
 
-	SetResourceName(resource RID, name string)
+	/*
+	   DrawingOnScreen is a high-level variant of [Interface.Drawing], with the [Frame] automatically
+	   set for drawing onto the window specified by the screen ID.
 
-	ShaderCompileBinaryFromSPIRV(span mmm.Lifetime, shader ffi.Managed[ShaderSPIRV], name string) ffi.Bytes
-	ShaderCompileSourceIntoSPIRV(span mmm.Lifetime, shader ffi.Managed[ShaderSource], allow_cache bool) ShaderSPIRV
-	ShaderCreateFromBytecode(span mmm.Lifetime, code ffi.Bytes, id ShaderPlaceholder) Shader
-	ShaderCreateFromSPIRV(span mmm.Lifetime, shader ffi.Managed[ShaderSPIRV], name string) Shader
-	ShaderCreatePlaceholder(span mmm.Lifetime) ShaderPlaceholder
-	ShaderGetVertexInputAttributeMask(shader Shader) int64
+	   Note: Cannot be used with local rendering devices, as these don't have a screen. If called on
+	   a local RenderingDevice, [DrawingOnScreen] panics.
+	*/
+	DrawingOnScreen(screen Screen, clear uc.Color, fn func(Drawing))
 
-	StorageBufferCreate(span mmm.Lifetime, size_bytes int, data ffi.Bytes, usage_flags StorageBufferUsage) StorageBuffer
+	// ExtensionTexture returns the texture for an existing image (VkImage) with the given type, format, samples,
+	// usage_flags, width, height, depth, and layers. This can be used to allow the rendering device to render onto foreign images.
+	ExtensionTexture(ttype TextureType, format DataFormat, samples TextureSamples, usage TextureUsage, image uintptr, width, height, depth, layers int) Texture
 
-	Submit()
-	Sync()
+	// FrameDelay returns the frame count kept by the graphics API. Higher values result in higher input lag, but with
+	// more consistent throughput. For the main RenderingDevice, frames are cycled (usually 3 with triple-buffered V-Sync
+	// enabled). However, local RenderingDevices only have 1 frame.
+	FrameDelay() int
 
-	TextureBufferCreate(span mmm.Lifetime, size_bytes int, data_format DataFormat, data ffi.Bytes) TextureBuffer
-	TextureClear(texture Texture, color uc.Color, base_mipmap, mipmap_count, base_layer, layer_count int, post_barrier BarrierMask) error
-	TextureCopy(src, dst Texture, src_pos, dst_pos, size xy.Vector3, src_mipmap, dst_mipmap, src_layer, dst_layer int, post_barrier BarrierMask) error
-	TextureCreate(span mmm.Lifetime, format ffi.Managed[TextureFormat], view ffi.Managed[TextureView], data ffi.Managed[[]ffi.Bytes]) Texture
-	TextureCreateFromExtension(span mmm.Lifetime,
-		texture_type TextureType, format DataFormat, samples TextureSamples, usage_flags TextureUsage,
-		image, width, height, depth, layers int,
-	) Texture
-	TextureCreateShared(span mmm.Lifetime, view ffi.Managed[TextureView], with_texture Texture) Texture
-	TextureCreateSharedFromSlice(span mmm.Lifetime, view ffi.Managed[TextureView], with_texture Texture, layer, mipmap, mipmaps int, slice_type TextureSliceType) Texture
-	TextureGetData(span mmm.Lifetime, texture Texture, layer int) ffi.Bytes
-	TextureGetFormat(tex Texture) TextureFormat
-	TextureGetNativeHandle(tex Texture) uint64
-	TextureIsFormatSupportedForUsage(format DataFormat, usage TextureUsage) bool
-	TextureIsShared(tex Texture) bool
-	TextureIsValid(tex Texture) bool
-	TextureResolveMultisample(src, dst Texture, post_barrier BarrierMask) error
-	TextureUpdate(tex Texture, layer int, data ffi.Bytes, post_barrier BarrierMask) error
+	/*
+		FramebufferFormat creates a new framebuffer format with the specified attachments and eyes.
 
-	UniformBufferCreate(span mmm.Lifetime, size_bytes int, data ffi.Bytes) UniformBuffer
-	UniformSetCreate(span mmm.Lifetime, uniforms ffi.Managed[[]Uniform], shader Shader, shader_set int) UniformSet
-	UniformSetIsValid(set UniformSet) bool
+		If 'eyes' is greater than or equal to 2, enables multiview which is used for VR rendering.
+		In Vulkan, this requires support for the multiview extension.
+	*/
+	FramebufferFormat(eyes int, attachments []AttachmentFormat, passes []FramebufferPass) FramebufferFormat
 
-	VertexArrayCreate(span mmm.Lifetime, vertex_count int, vertex_format VertexFormat, src_buffers ffi.Managed[[]Buffer], offsets ffi.Slice[int64]) VertexArray
-	VertexFormatCreate(span mmm.Lifetime, vertex_descriptions ffi.Managed[[]VertexAttribute]) VertexFormat
+	// IndexBufferU16 creates a new uint16 index buffer.
+	IndexBufferU16(data []uint16) IndexBuffer
 
-	FreeRID(uintptr)
+	// IndexBufferU32 creates a new uint32 index buffer.
+	IndexBufferU32(data []uint32) IndexBuffer
+
+	// Limit returns the value of the specified limit. This limit varies depending on the current graphics hardware (and
+	// sometimes the driver version). If the given limit is exceeded, rendering errors will occur.
+	Limit(limit Limit) int
+
+	// MemoryUsage returns the current memory usage of the rendering device.
+	MemoryUsage(mtype MemoryType) int
+
+	// PipelineCache returns the universally unique identifier for the pipeline cache. This is used to cache shader files on disk,
+	// which avoids shader recompilations on subsequent engine runs. This UUID varies depending on the graphics card
+	// model, but also the driver version. Therefore, updating graphics drivers will invalidate the shader cache.
+	PipelineCache() string
+
+	// Processor creates a new [Processor] for [Compute]. Defines can be boolean and/or numeric values.
+	Processor(shader Shader, defines []any) Processor
+
+	// Renderer creates a new [Renderer] for [Drawing].
+	Renderer(shader Shader, options RenderingOptions) Renderer
+
+	// Local create a new local rendering device. This is most useful for performing
+	// compute operations on the GPU independently from the rest of the program.
+	RenderingDevice() Local
+
+	// Sampler creates a new sampler.
+	Sampler(state SamplerState) Sampler
+
+	// Screen returns the Nth screen.
+	Screen(n int) Screen
+
+	/*
+		Shader creates a placeholder [Shader] without initializing. This allows you to create a [Shader]
+		and pass it around, but defer compiling it to a later time.
+	*/
+	Shader() Shader
+
+	// SharedTexture creates a shared texture using the specified view and the texture information from 'with'.
+	SharedTexture(view TextureView, with Texture) Texture
+
+	// StorageBuffer creates a storage buffer with the specified data and usage.
+	StorageBuffer(usage StorageBufferUsage, data []byte) StorageBuffer
+
+	// Texture creates a new texture with the specified parameters.
+	Texture(format TextureFormat, view TextureView, data [][]byte) Texture
+
+	// TextureBuffer creates a new texture buffer.
+	TextureBuffer(format DataFormat, data []byte) TextureBuffer
+
+	/*
+		TextureCopy copies the src to dst with the specified from, into position and size coordinates.
+		The Z axis of the from, into and size must be 0 for 2-dimensional textures. Source and
+		destination mipmaps/layers must also be specified, with these parameters being 0 for textures
+		without mipmaps or single-layer textures.
+
+		Note: src texture can't be copied while a draw list that uses it as part of a framebuffer is being
+		created. Ensure the draw list is finalized (and that the color/depth texture using it is not set
+		to [FrameSuspend]) to copy this texture.
+
+		Note: src texture requires the [TextureCanCopyFrom] to be retrieved.
+
+		Note: dst can't be copied while a draw list that uses it as part of a framebuffer is being created.
+		Ensure the draw list is finalized (and that the color/depth texture using it is not set to
+		[FrameSuspend]) to copy this texture.
+
+		Note: dst requires the [TextureCanCopyInto] to be retrieved.
+
+		Note: src and dst must be of the same type (color or depth).
+	*/
+	TextureCopy(src, dst Texture, from, into, size xy.Vector3, src_mipmap, dst_mipmp, src_layer, dst_layer int, barrier Barrier) error
+
+	// TextureFormatIsSupportedForUsage returns true if the specified format is supported for the given usage, false otherwise.
+	TextureFormatIsSupportedForUsage(format DataFormat, usage TextureUsage) bool
+
+	/*
+		TextureResolveMultiSample resolves the from_texture texture onto to_texture with multisample antialiasing enabled.
+		This must be used when rendering a framebuffer for MSAA to work.
+
+		Note: from and into textures must have the same dimension, format and type (color or depth).
+
+		Note: from can't be copied while a draw list that uses it as part of a framebuffer is being created.
+		Ensure the draw list is finalized (and that the color/depth texture using it is not set to
+		[FrameSuspend]) to resolve this texture.
+
+		Note: from requires the [TextureCanCopyFrom] to be retrieved.
+
+		Note: from must be multisampled and must also be 2D (or a slice of a 3D/cubemap texture).
+
+		Note: into can't be copied while a draw list that uses it as part of a framebuffer is being created.
+		Ensure the draw list is finalized (and that the color/depth texture using it is not set to
+		[FrameSuspend]) to resolve this texture.
+
+		Note: into texture requires the [TextureCanCopyInto] to be retrieved.
+
+		Note: into texture must not be multisampled and must also be 2D (or a slice of a 3D/cubemap texture).
+	*/
+	TextureResolveMultiSample(from, into Texture, barrier Barrier) error
+
+	// UniformBuffer creates a new uniform buffer with the specified data.
+	UniformBuffer(data []byte) UniformBuffer
+
+	// VertexArray creates a new vertex from the specified buffers, optionally, with offsets.
+	VertexArray(vertices int, format VertexFormat, buffers []Buffer, offsets []int64) VertexArray
+
+	// VertexBuffer creates a new vertex buffer with the specified data.
+	VertexBuffer(data []byte) VertexBuffer
+
+	// VertexFormat creates a new vertex format with the specified attributes.
+	VertexFormat(attributes []VertexAttribute) VertexFormat
 }
 
-type ShaderPlaceholder mmm.Pointer[Interface, ShaderPlaceholder, uintptr]
-
-func (placeholder ShaderPlaceholder) Free() {
-	(*mmm.API(placeholder)).FreeRID(mmm.End(placeholder))
-}
-
-type RID uintptr
-
-type FramebufferPass struct {
-	ColorAttachments    ffi.Slice[int32]
-	DepthAttachment     int
-	InputAttachments    ffi.Slice[int32]
-	PreserveAttachments ffi.Slice[int32]
-	ResolveAttachments  ffi.Slice[int32]
-}
-
-type Screen int64
-
-type FramebufferFormat int64
-
-type DrawList int64
-
-type ComputeList int64
-
-type VertexFormat int64
-
-type ComputePipeline mmm.Pointer[Interface, ComputePipeline, uintptr]
-
-func (pipeline ComputePipeline) Free() {
-	(*mmm.API(pipeline)).FreeRID(mmm.End(pipeline))
-}
-
-type UniformSet mmm.Pointer[Interface, UniformSet, uintptr]
-
-func (set UniformSet) Free() {
-	(*mmm.API(set)).FreeRID(mmm.End(set))
-}
-
-type Framebuffer mmm.Pointer[Interface, Framebuffer, uintptr]
-
-func (fb Framebuffer) Free() { (*mmm.API(fb)).FreeRID(mmm.End(fb)) }
-
-type IndexArray mmm.Pointer[Interface, IndexArray, uintptr]
-
-func (array IndexArray) Free() { (*mmm.API(array)).FreeRID(mmm.End(array)) }
-
-type VertexArray mmm.Pointer[Interface, VertexArray, uintptr]
-
-func (array VertexArray) Free() { (*mmm.API(array)).FreeRID(mmm.End(array)) }
-
-type RenderPipeline mmm.Pointer[Interface, RenderPipeline, uintptr]
-
-func (pipeline RenderPipeline) Free() { (*mmm.API(pipeline)).FreeRID(mmm.End(pipeline)) }
-
-type Shader mmm.Pointer[Interface, Shader, uintptr]
-
-func (shader Shader) Free() { (*mmm.API(shader)).FreeRID(mmm.End(shader)) }
-
-type Sampler mmm.Pointer[Interface, Sampler, uintptr]
-
-func (sampler Sampler) Free() { (*mmm.API(sampler)).FreeRID(mmm.End(sampler)) }
-
-type BarrierMask uint32
+// Barrier used for syncronisation.
+type Barrier uint32
 
 const (
-	BarrierMaskVertex BarrierMask = 1 << iota
-	BarrierMaskCompute
-	BarrierMaskTransfer
-	BarrierMaskFragment
+	BarrierVertex Barrier = 1 << iota
+	BarrierCompute
+	BarrierTransfer
+	BarrierFragment
 
-	BarrierMaskRaster = BarrierMaskVertex | BarrierMaskFragment
+	BarrierRaster = BarrierVertex | BarrierFragment
 
-	BarrierMaskAll       = 32767
-	BarrierMaskNoBarrier = 32768
+	BarrierFull    = 32767
+	BarrierDisable = 32768 // no barrier for any type.
 )
 
-type InitialAction int
-
-const (
-	InitialActionClear InitialAction = iota
-	InitialActionClearRegion
-	InitialActionClearRegionContinue
-	InitialActionKeep
-	InitialActionDrop
-	InitialActionContinue
-)
-
-type FinalAction int
-
-const (
-	FinalActionRead FinalAction = iota
-	FinalActionDiscard
-	FinalActionContinue
-)
-
-type AttachmentFormat struct {
-	Format     DataFormat
-	Samples    TextureSamples
-	UsageFlags int
-}
-
-type DriverResource int
-
-const (
-	DriverResourceVulkanDevice DriverResource = iota
-	DriverResourceVulkanPhysicalDevice
-	DriverResourceVulkanInstance
-	DriverResourceVulkanQueue
-	DriverResourceVulkanQueueFamilyIndex
-	DriverResourceVulkanImage
-	DriverResourceVulkanImageView
-	DriverResourceVulkanImageNativeTextureFormat
-	DriverResourceVulkanSampler
-	DriverResourceVulkanDescriptorSet
-	DriverResourceVulkanBuffer
-	DriverResourceVulkanComputePipeline
-	DriverResourceVulkanRenderPipeline
-)
-
+// MemoryType classifies memory usage.
 type MemoryType int
 
 const (
-	MemoryTextures MemoryType = iota
-	MemoryBuffers
-	MemoryTotal
+	MemoryTextures MemoryType = iota // texture related memory in use.
+	MemoryBuffers                    // buffers in use.
+	MemoryTotal                      // total GPU memory.
 )
 
-type IndexBufferFormat int
+// Local rendering device, can be used in an independent thread.
+type Local interface {
+	Interface
 
-const (
-	IndexBufferUint16 IndexBufferFormat = iota
-	IndexBufferUint32
-)
+	// Submit pushes the frame setup and draw command buffers then marks the local device as currently
+	// processing (which allows calling [Local.Sync]).
+	Submit()
 
-type RenderPrimitive int
-
-const (
-	RenderPrimitivePoints RenderPrimitive = iota
-	RenderPrimitiveLines
-	RenderPrimitiveLinesWithAdjacency
-	RenderPrimitiveLineStrips
-	RenderPrimitiveLineStripsWithAdjacency
-	RenderPrimitiveTriangles
-	RenderPrimitiveTrianglesWithAdjacency
-	RenderPrimitiveTriangleStrips
-	RenderPrimitiveTriangleStripsWithAdjacency
-	RenderPrimitiveTriangleStripsWithRestartIndex
-	RenderPrimitiveTessellationPatch
-)
-
-type PipelineRasterizationState struct {
-	CullMode                PolygonCullMode
-	DepthBiasClamp          float64
-	DepthBiasConstantFactor float64
-	DepthBiasEnabled        bool
-	DepthBiasSlopeFactor    float64
-	DiscardPrimitives       bool
-	EnableDepthClamp        bool
-	FrontFace               PolygonFrontFace
-	LineWidth               float64
-	PatchControlPoints      int64
-	Wireframe               bool
+	// Sync forces a synchronization between the CPU and GPU, which may be required in certain cases.
+	// Only call this when needed, as CPU-GPU synchronization has a performance cost.
+	Sync()
 }
 
-type PolygonCullMode int
-
-const (
-	PolygonCullDisabled PolygonCullMode = iota
-	PolygonCullFront
-	PolygonCullBack
-)
-
-type PolygonFrontFace int
-
-const (
-	PolygonFrontFaceClockwise PolygonFrontFace = iota
-	PolygonFrontFaceCounterClockwise
-)
-
-type PipelineMultisampleState struct {
-	EnableAlphaToCoverage bool
-	EnableAlphaToOne      bool
-	EnableSampleShading   bool
-	MinSampleShading      float64
-	SampleCount           TextureSamples
-	SampleMasks           ffi.Managed[[]int64]
+// AttachmentFormat describes the format of a framebuffer attachment.
+type AttachmentFormat struct {
+	Format  DataFormat     // The attachment's data format.
+	Samples TextureSamples // The number of samples used when sampling the attachment.
+	Usage   TextureUsage   // The attachment's usage flags, which determine what can be done with it.
 }
 
-type PipelineColorBlendState struct {
-	Attachments          ffi.Managed[[]PipelineColorBlendStateAttachment]
-	BlendConstant        uc.Color
-	EnableLogicOperation bool
-	LogicOperation       LogicOperation
+// FramebufferPass contains the list of attachment descriptions for a framebuffer pass. Each points with an
+// index to a previously supplied list of texture attachments.
+//
+// Multipass framebuffers can optimize some configurations in mobile. On desktop, they provide little to no
+// advantage.
+type FramebufferPass struct {
+	ColorAttachments      []int32 // Color attachments in order starting from 0.
+	DepthAttachment       int32   // Depth attachment. -1 should be used if no depth buffer is required for this pass.
+	InputAttachments      []int32 // Used for multipass framebuffers (more than one render pass). Converts an attachment to an input. Make sure to also supply it properly in the [Variables].
+	AttachmentsToPreserve []int32 // (otherwise they are erased).
+	AttachmentsToResolve  []int32 // If the color attachments are multisampled, non-multisampled resolve attachments can be provided.
 }
 
-type PipelineColorBlendStateAttachment struct {
-	AlphaBlendOperation         BlendOperation
-	ColorBlendOperation         BlendOperation
-	DestinationAlphaBlendFactor BlendFactor
-	DestinationColorBlendFactor BlendFactor
-	EnableBlend                 bool
-	SourceAlphaBlendFactor      BlendFactor
-	SourceColorBlendFactor      BlendFactor
-	WriteA                      bool
-	WriteB                      bool
-	WriteG                      bool
-	WriteR                      bool
+// Processor for compute operations.
+type Processor any
+
+// Drawing operation.
+type Drawing interface {
+	// DebugBlock creates a command buffer debug label region that can be displayed in third-party tools such as RenderDoc.
+	//
+	// In Vulkan, the VK_EXT_DEBUG_UTILS_EXTENSION_NAME extension must be available and enabled for command buffer debug
+	// label region to work. See also [DebugLabel].
+	DebugBlock(name string, color uc.Color, block func())
+
+	// DebugLabel inserts a command buffer debug label region in the current command buffer.
+	DebugLabel(name string, color uc.Color)
+
+	// SetBlendConstant sets the blend constant for the next draw command. Only used if the
+	// shader is created with [BlendConstants] flag set.
+	SetBlendConstant(color uc.Color)
+
+	// SetData sets the push constant data buffer for the specified compute operation. The shader
+	// determines how this binary data is used.
+	SetData(data []byte)
+
+	// SetIndexArray sets the index array to use for the next draw command.
+	SetIndexArray(array IndexArray)
+
+	// SetRenderer sets the renderer to use for the next draw command.
+	SetRenderer(r Renderer)
+
+	// SetScissor sets the scissor region for the next draw command. Setting the
+	// region to nil will disable the scissor. An empty region will default to
+	// the framebuffer size.
+	SetScissor(region *xy.Rect2)
+
+	// SetVariables binds the [Variables] to the drawing operation.
+	SetVariables(level VariableLevel, variables Variables)
+
+	// SetVertexArray sets the vertex array to use for the next draw command.
+	SetVertexArray(array VertexArray)
+
+	// Submit the drawing for rendering on the GPU. This is the raster equivalent to [Compute.Submit].
+	Submit(indices bool, instances, vertices int)
+
+	// SwitchToNextPass switches to the next draw pass.
+	SwitchToNextPass()
 }
 
-type LogicOperation int
+// FrameStart action.
+type FrameStart int
 
 const (
-	LogicOperationClear LogicOperation = iota
-	LogicOperationAnd
-	LogicOperationAndReverse
-	LogicOperationCopy
-	LogicOperationAndInverted
-	LogicOperationNoop
-	LogicOperationXor
-	LogicOperationOr
-	LogicOperationNor
-	LogicOperationEquivalent
-	LogicOperationInvert
-	LogicOperationOrReverse
-	LogicOperationCopyInverted
-	LogicOperationOrInverted
-	LogicOperationNand
-	LogicOperationSet
+	FrameClear             FrameStart = iota // Start rendering and clear the whole framebuffer.
+	FrameClearRegion                         // Start rendering and clear the framebuffer in the specified region.
+	FrameClearRegionResume                   // Continue suspended rendering and clear the framebuffer in the specified region.
+	FrameKeep                                // Start rendering, but keep attached color texture contents.
+	FrameWrite                               // Start rendering, ignore what is there; write above it.
+	FrameResume                              // Continue suspended rendering.
 )
 
-type BlendOperation int
+// FrameEnded action.
+type FrameEnded int
 
 const (
-	BlendOperationAdd BlendOperation = iota
-	BlendOperationSubtract
-	BlendOperationReverseSubtract
-	BlendOperationMinimum
-	BlendOperationMaximum
+	FrameRead    FrameEnded = iota // Store the texture for reading and make it read-only.
+	FrameDrop                      // Discard the texture data and make it read-only.
+	FrameSuspend                   // Store the texture so that drawing can be resumed later.
 )
 
-type BlendFactor int
-
-const (
-	BlendFactorZero BlendFactor = iota
-	BlendFactorOne
-	BlendFactorSourceColor
-	BlendFactorOneMinusSourceColor
-	BlendFactorDestinationColor
-	BlendFactorOneMinusDestinationColor
-	BlendFactorSourceAlpha
-	BlendFactorOneMinusSourceAlpha
-	BlendFactorDestinationAlpha
-	BlendFactorOneMinusDestinationAlpha
-	BlendFactorConstantColor
-	BlendFactorOneMinusConstantColor
-	BlendFactorConstantAlpha
-	BlendFactorOneMinusConstantAlpha
-	BlendFactorSourceAlphaSaturate
-	BlendFactorSource1Color
-	BlendFactorOneMinusSource1Color
-	BlendFactorSource1Alpha
-	BlendFactorOneMinusSource1Alpha
-)
-
-type PipelineDepthStencilState struct {
-	BackOperationCompare      CompareOperator
-	BackOperationCompareMask  int64
-	BackOperationDepthFail    StencilOperation
-	BackOperationFail         StencilOperation
-	BackOperationPass         StencilOperation
-	BackOperationReference    int64
-	BackOperationWriteMask    int64
-	DepthCompareOperator      CompareOperator
-	DepthRangeMax             float64
-	DepthRangeMin             float64
-	EnableDepthRange          bool
-	EnableDepthTest           bool
-	EnableDepthWrite          bool
-	EnableStencil             bool
-	FrontOperationCompare     CompareOperator
-	FrontOperationCompareMask int64
-	FrontOperationDepthFail   StencilOperation
-	FrontOperationFail        StencilOperation
-	FrontOperationPass        StencilOperation
-	FrontOperationReference   int64
-	FrontOperationWriteMask   int64
+// Frame options.
+type Frame struct {
+	Buffer  Framebuffer
+	Color   func() (FrameStart, FrameEnded)
+	Depth   func() (FrameStart, FrameEnded)
+	Clear   Clear
+	Region  xy.Rect2
+	Storage []Texture
 }
 
-type CompareOperator int
-
-const (
-	CompareOperatorNever CompareOperator = iota
-	CompareOperatorLess
-	CompareOperatorEqual
-	CompareOperatorLessOrEqual
-	CompareOperatorGreater
-	CompareOperatorNotEqual
-	CompareOperatorGreaterOrEqual
-	CompareOperatorAlways
-)
-
-type StencilOperation int
-
-const (
-	StencilOperationKeep StencilOperation = iota
-	StencilOperationZero
-	StencilOperationReplace
-	StencilOperationIncrementAndClamp
-	StencilOperationDecrementAndClamp
-	StencilOperationInvert
-	StencilOperationIncrementAndWrap
-	StencilOperationDecrementAndWrap
-)
-
-type PipelineDynamicStateFlags int
-
-const (
-	PipelineDynamicLineWidth PipelineDynamicStateFlags = 1 << iota
-	PipelineDynamicDepthBias
-	PipelineDynamicBlendConstants
-	PipelineDynamicDepthBounds
-	PipelineDynamicStencilCompareMask
-	PipelineDynamicStencilWriteMask
-	PipelineDynamicStencilReference
-)
-
-type PipelineSpecializationConstant struct {
-	ConstantID int
-	Value      any
+// Clear values that the buffers will be cleared to.
+type Clear struct {
+	Colors  []uc.Color
+	Depth   float64
+	Stencil int
 }
 
-type SamplerState struct {
-	AnisotropyMax       float64
-	BorderColor         SamplerBorderColor
-	CompareOperator     CompareOperator
-	EnableCompare       bool
-	LevelOfDetailBias   float64
-	MagnificationFilter SamplerFilter
-	MaxLevelOfDetail    float64
-	MinificationFilter  SamplerFilter
-	MinLevelOfDetail    float64
-	MipmapFilter        SamplerFilter
-	RepeatU             SamplerRepeatMode
-	RepeatV             SamplerRepeatMode
-	RepeatW             SamplerRepeatMode
-	UnnormalizedUVW     bool
-	UseAnisotropy       bool
+type FramebufferFormat interface {
+	// Framebuffer creates a new framebuffer out of the specified textures.
+	Framebuffer(textures []Texture) Framebuffer
+
+	// TextureSamples returns the number of texture samples used for the given framebuffer.
+	TextureSamples(pass int) TextureSamples
 }
 
-type SamplerBorderColor int
-
-const (
-	SamplerBorderColorFloatTransparentBlack SamplerBorderColor = iota
-	SamplerBorderColorIntTransparentBlack
-	SamplerBorderColorFloatOpaqueBlack
-	SamplerBorderColorIntOpaqueBlack
-	SamplerBorderColorFloatOpaqueWhite
-	SamplerBorderColorIntOpaqueWhite
-)
-
-type SamplerFilter int
-
-const (
-	SamplerFilterNearest SamplerFilter = iota
-	SamplerFilterLinear
-)
-
-type SamplerRepeatMode int
-
-const (
-	SamplerRepeatModeRepeat SamplerRepeatMode = iota
-	SamplerRepeatModeMirroredRepeat
-	SamplerRepeatModeClampToEdge
-	SamplerRepeatModeClampToBorder
-	SamplerRepeatModeMirrorClampToEdge
-)
-
-type ShaderSPIRV struct {
-	Compute               ffi.Bytes
-	Fragment              ffi.Bytes
-	TesselationControl    ffi.Bytes
-	TesselationEvaluation ffi.Bytes
-	Vertex                ffi.Bytes
+type Framebuffer interface {
+	// IsValid returns true if the framebuffer is valid, false otherwise.
+	IsValid() bool
 }
 
-type ShaderSource struct {
-	Language              ShaderLanguage
-	Compute               ffi.Bytes
-	Fragment              ffi.Bytes
-	TesselationControl    ffi.Bytes
-	TesselationEvaluation ffi.Bytes
-	Vertex                ffi.Bytes
+// IndexArray for storing mesh indices.
+type IndexArray any
+
+// VertexArray for storing mesh vertices.
+type VertexArray any
+
+// Compute operation.
+type Compute interface {
+	// SetData sets the push constant data buffer for the specified compute operation. The shader
+	// determines how this binary data is used.
+	SetData(data []byte)
+
+	/*
+		SetProcessor sets the processor to use when processing the compute operation. If the
+		shader has changed since the last time this function was called, the rendering device will
+		unbind all descriptor sets and will re-bind them inside [Compute.Submit].
+	*/
+	SetProcessor(p Processor)
+
+	/*
+		SetVariables binds the [Variables] to the compute operation. The rendering device ensures
+		that all textures in the uniform set have the correct access masks. If the rendering device had
+		to change access masks of textures, it will raise a image memory barrier.
+	*/
+	SetVariables(level VariableLevel, variables Variables)
+
+	// Submit submits the compute list for processing on the GPU. This is the compute equivalent
+	// to [Drawing.Submit].
+	Submit(x, y, z int)
 }
 
-type ShaderLanguage int
+// Timestamp for performance monitoring.
+type Timestamp interface {
+	// CPU returns the time since the rendering device started until 't' or false
+	// if the timestamp is not available.
+	CPU() (time.Duration, bool)
 
-const (
-	ShaderLanguageGLSL ShaderLanguage = iota
-	ShaderLanguageHLSL
-)
+	// GPU returns the time since the rendering device started until 't' or false
+	// if the timestamp is not available.
+	GPU() (time.Duration, bool)
+}
 
+// Resource allocated by the rendering device.
+type Resource interface {
+	// RID returns the underlying handle for the resource.
+	RID() uint64
+
+	// Free any resources associated with the resource. Subsequent use will result in a panic.
+	Free()
+}
+
+// Buffer that stores data in GPU memory.
+type Buffer interface {
+	Resource
+	Nameable
+
+	/*
+	   Clear the contents of the buffer. Always raises a memory barrier.
+
+	   Returns an error if:
+
+	     - the size isn't a multiple of four
+
+	     - the region specified by offset + size_bytes exceeds the buffer
+
+	     - a draw list is currently active (created by [Interface.DrawList])
+
+	     - a compute list is currently active (created by [Interface.ComputeList])
+	*/
+	Clear() error
+
+	io.ReaderAt
+	io.WriterAt
+}
+
+// VertexBuffer for storing mesh vertices.
+type VertexBuffer interface {
+	Buffer
+}
+
+// IndexBuffer for storing mesh indices.
+type IndexBuffer interface {
+	Buffer
+}
+
+// UniformBuffer for storing uniform data.
+type UniformBuffer interface {
+	Variable
+	Buffer
+}
+
+// StorageBuffer for storing data in GPU memory.
+type StorageBuffer interface {
+	Variable
+	Buffer
+}
+
+// Nameable resources can be debugged in RenderDoc.
+type Nameable interface {
+	// SetResourceName sets the resource name for id to name. This is used for debugging with third-party tools such as RenderDoc.
+	SetResourceName(name string)
+}
+
+// Screen identifies a display region, such as an OS window.
+type Screen interface {
+	// FramebufferFormat returns the screen's framebuffer format.
+	FramebufferFormat() FramebufferFormat
+
+	// Height returns the window height matching the graphics API context for the given window ID (in pixels).
+	Height() int
+
+	// Width returns the window width matching the graphics API context for the given window ID (in pixels).
+	Width() int
+}
+
+// Sampler for sampling textures.
+type Sampler interface {
+	Resource
+	Nameable
+	Variable
+
+	// FormatSupportedForFilter returns true if implementation supports using a texture of format with the given [SamplerFilter].
+	FormatSupportedForFilter(format DataFormat, filter Filter) bool
+}
+
+// VertexFormat ID.
+type VertexFormat int
+
+// StorageBufferUsage flags.
 type StorageBufferUsage int
 
 const (
 	StorageBufferDispatchIndirect StorageBufferUsage = 1 << iota
 )
 
-type Uniform struct {
-	Binding     int
-	UniformType UniformType
-}
-
-type UniformType int
-
-const (
-	UniformTypeSampler UniformType = iota
-	UniformTypeSamplerWithTexture
-	UniformTypeTexture
-	UniformTypeImage
-	UniformTypeTextureBuffer
-	UniformTypeSamplerWithTextureBuffer
-	UniformTypeImageBuffer
-	UniformTypeUniformBuffer
-	UniformTypeStorageBuffer
-	UniformTypeInputAttachment
-)
-
+// VertexAttribute structure.
 type VertexAttribute struct {
 	Format    DataFormat
-	Frequency VertexFrequency
+	Frequency AttributeFrequency
 	Location  int
 	Offset    int
 	Stride    int
 }
 
-type VertexFrequency int
+// AttributeFrequency
+type AttributeFrequency int
 
 const (
-	VertexFrequencyVertex VertexFrequency = iota
-	VertexFrequencyInstance
+	// Vertex attribute addressing is a function of the vertex. This is used to specify the rate at which vertex attributes are pulled from buffers.
+	AttributePerVertex AttributeFrequency = iota
+	// Vertex attribute addressing is a function of the instance index. This is used to specify the rate at which vertex attributes are pulled from buffers.
+	AttributePerInstance
 )

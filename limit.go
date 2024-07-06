@@ -1,5 +1,6 @@
 package rd
 
+// Limit defines the maximum value for a particular feature supported by the rendering device.
 type Limit int
 
 const (

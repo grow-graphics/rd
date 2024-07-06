@@ -1,5 +1,6 @@
 package rd
 
+// DataFormat for texture.
 type DataFormat int
 
 const (
@@ -221,4 +222,5 @@ const (
 	DataFormat_G16_B16_R16_3PLANE_422_UNORM
 	DataFormat_G16_B16R16_2PLANE_422_UNORM
 	DataFormat_G16_B16_R16_3PLANE_444_UNORM
+	DataFormatDefault
 )
