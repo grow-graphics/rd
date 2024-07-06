@@ -452,9 +452,9 @@ type Buffer interface {
 
 	     - the region specified by offset + size_bytes exceeds the buffer
 
-	     - a draw list is currently active (created by [Interface.DrawList])
+	     - a draw list is currently active (created by [Interface.Drawing])
 
-	     - a compute list is currently active (created by [Interface.ComputeList])
+	     - a compute list is currently active (created by [Interface.Compute])
 	*/
 	Clear() error
 
